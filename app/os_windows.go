@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"log"
 	"runtime"
 	"sort"
 	"strings"
@@ -152,7 +153,8 @@ func initResources() error {
 	return nil
 }
 
-const dwExStyle = windows.WS_EX_APPWINDOW | windows.WS_EX_WINDOWEDGE
+const WS_EX_ACCEPTFILES = 0x00000010
+const dwExStyle = windows.WS_EX_APPWINDOW | windows.WS_EX_WINDOWEDGE | WS_EX_ACCEPTFILES
 
 func createNativeWindow() (*window, error) {
 	var resErr error
@@ -214,6 +216,8 @@ func (w *window) update() {
 	)
 	w.w.Event(ConfigEvent{Config: w.config})
 }
+
+const WM_DROPFILES = 563
 
 func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 	win, exists := winMap.Load(hwnd)
@@ -417,6 +421,23 @@ func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr
 	case windows.WM_IME_ENDCOMPOSITION:
 		w.w.SetComposingRegion(key.Range{Start: -1, End: -1})
 		return windows.TRUE
+	case WM_DROPFILES:
+		log.Println("got WM_DROPFILES")
+		numFiles, err := windows.DragQueryFile_GetFileCount(wParam)
+		if err != nil {
+			log.Printf("error: %s\n", err)
+		}
+		log.Printf("WM_DROPFILES: dragged %d\n", numFiles)
+		var files []string
+		for i := 0; i < int(numFiles); i++ {
+			fileName, err := windows.DragQueryFile_GetFileName(wParam, uint(i))
+			if err != nil {
+				log.Printf("WM_DROPFILES: %v\n", err)
+			}
+			files = append(files, fileName)
+		}
+		log.Printf("WM_DROPFILES: all files %v\n", files)
+		windows.DragFinish(wParam)
 	}
 
 	return windows.DefWindowProc(hwnd, msg, wParam, lParam)

@@ -379,6 +379,10 @@ var (
 	_ImmReleaseContext       = imm32.NewProc("ImmReleaseContext")
 	_ImmSetCandidateWindow   = imm32.NewProc("ImmSetCandidateWindow")
 	_ImmSetCompositionWindow = imm32.NewProc("ImmSetCompositionWindow")
+
+	shell32        = syscall.NewLazySystemDLL("shell32")
+	_DragQueryFile = shell32.NewProc("DragQueryFileW")
+	_DragFinish    = shell32.NewProc("DragFinish")
 )
 
 func AdjustWindowRectEx(r *Rect, dwStyle uint32, bMenu int, dwExStyle uint32) {
@@ -813,4 +817,37 @@ func (p *WindowPlacement) Set(Left, Top, Right, Bottom int) {
 	p.rcNormalPosition.Top = int32(Top)
 	p.rcNormalPosition.Right = int32(Right)
 	p.rcNormalPosition.Bottom = int32(Bottom)
+}
+
+// / From MS DOcs
+// / UINT DragQueryFileW(
+// /   [in]  HDROP  hDrop,
+// /   [in]  UINT   iFile,
+// /   [out] LPWSTR lpszFile,
+// /         UINT   cch
+// / );
+func DragQueryFile_GetFileName(hDrop uintptr, iFile uint) (string, error) {
+	bufSize := uint(512)
+	buf := make([]uint16, bufSize)
+	ptr := &buf[0]
+	r, _, err := _DragQueryFile.Call(hDrop, uintptr(uint(iFile)), uintptr(unsafe.Pointer(ptr)), uintptr(bufSize))
+	if r > 0 {
+		file := syscall.UTF16ToString(buf[:])
+		return file, nil
+	} else {
+		return "", fmt.Errorf("while DragQueryFile: %w", err)
+	}
+}
+
+func DragQueryFile_GetFileCount(hDrop uintptr) (uint, error) {
+	r, _, err := _DragQueryFile.Call(hDrop, uintptr(uint(0xFFFFFFFF)), uintptr(unsafe.Pointer(nil)), 0)
+	if r > 0 {
+		return uint(r), nil
+	} else {
+		return 0, fmt.Errorf("while DragQueryFile: %w", err)
+	}
+}
+
+func DragFinish(hDrop uintptr) {
+	_DragFinish.Call(hDrop)
 }
