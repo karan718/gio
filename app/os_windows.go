@@ -3,10 +3,13 @@
 package app
 
 import (
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -27,6 +30,7 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/io/system"
+	"gioui.org/io/transfer"
 )
 
 type ViewEvent struct {
@@ -423,21 +427,42 @@ func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr
 		return windows.TRUE
 	case WM_DROPFILES:
 		log.Println("got WM_DROPFILES")
-		numFiles, err := windows.DragQueryFile_GetFileCount(wParam)
-		if err != nil {
-			log.Printf("error: %s\n", err)
-		}
-		log.Printf("WM_DROPFILES: dragged %d\n", numFiles)
-		var files []string
-		for i := 0; i < int(numFiles); i++ {
-			fileName, err := windows.DragQueryFile_GetFileName(wParam, uint(i))
-			if err != nil {
-				log.Printf("WM_DROPFILES: %v\n", err)
+
+		// Getting file names
+		if numFiles, err := windows.DragQueryFile_GetFileCount(wParam); err != nil {
+			log.Printf("WM_DROPFILES error in getting file count: %s\n", err)
+		} else {
+			log.Printf("WM_DROPFILES: dragged %d\n", numFiles)
+			var files []string
+			for i := 0; i < int(numFiles); i++ {
+				if fileName, err := windows.DragQueryFile_GetFileName(wParam, uint(i)); err != nil {
+					log.Printf("WM_DROPFILES: %v\n", err)
+				} else {
+					files = append(files, fileName)
+				}
 			}
-			files = append(files, fileName)
+			log.Printf("WM_DROPFILES: all files dropped %v\n", files)
+			windows.DragFinish(wParam)
+
+			// Sending event to transfer target using transfer.DataEvent.
+			// Setting a temporary file to transfer data within golang is not ideal but that is not being tested/implemented here
+			// TODO: get rid of temporary file
+			if f, err := os.CreateTemp("", "tmpfile-"); err != nil {
+				log.Printf("WM_DROPFILES error creating temporary file: %s\n", err)
+			} else {
+				enc := gob.NewEncoder(f)
+				if err := enc.Encode(files); err != nil {
+					log.Printf("WM_DROPFILES error: %s\n", err)
+				}
+				w.w.Event(transfer.DataEvent{
+					Type: "filenames",
+					Open: func() io.ReadCloser {
+						f.Seek(0, 0)
+						return f
+					},
+				})
+			}
 		}
-		log.Printf("WM_DROPFILES: all files %v\n", files)
-		windows.DragFinish(wParam)
 	}
 
 	return windows.DefWindowProc(hwnd, msg, wParam, lParam)
